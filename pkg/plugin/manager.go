@@ -33,7 +33,6 @@ func NewManager(cfg *config.Config) *Manager {
 // ActivateAll pulls, unpacks, and starts every driver defined in config
 func (m *Manager) ActivateAll() error {
 	for alias := range m.cfg.Drivers {
-		fmt.Printf("Ensuring CSI driver %s\r\n", alias)
 		if err := m.ensurePluginRunning(alias); err != nil {
 			return fmt.Errorf("failed to start driver %s: %w", alias, err)
 		}
@@ -49,37 +48,39 @@ func (m *Manager) ensurePluginRunning(alias string) error {
 	}
 	drvCfg := m.cfg.Drivers[alias]
 	tmpDir := filepath.Join("/plugins", alias)
+	rootfs := filepath.Join(tmpDir, "rootfs")
 	socketPath := filepath.Join("/run", alias+".sock")
 	socketPath2 := filepath.Join(tmpDir, "rootfs", socketPath)
 
-	// pull image
-	img, err := crane.Pull(drvCfg.Image)
-	if err != nil {
-		return fmt.Errorf("pull image %s: %w", drvCfg.Image, err)
+	// Download once, only active after that
+	if _, err := os.Stat(rootfs); err != nil {
+		fmt.Printf("Downloading CSI driver %s\r\n", alias)
+
+		img, err := crane.Pull(drvCfg.Image)
+		if err != nil {
+			return fmt.Errorf("pull image %s: %w", drvCfg.Image, err)
+		}
+		tarPath := filepath.Join(tmpDir, alias+".tar")
+		if err := os.MkdirAll(tmpDir, 0755); err != nil {
+			return fmt.Errorf("mkdir unpack dir: %w", err)
+		}
+		f, err := os.Create(tarPath)
+		if err != nil {
+			return fmt.Errorf("could not create tar file %s: %w", tarPath, err)
+		}
+		defer f.Close()
+		if err := crane.Export(img, f); err != nil {
+			return fmt.Errorf("failed to export image %s to tar: %w", drvCfg.Image, err)
+		}
+		if err := os.MkdirAll(rootfs, 0755); err != nil {
+			return fmt.Errorf("mkdir rootfs dir: %w", err)
+		}
+		if err := unpackTar(tarPath, rootfs); err != nil {
+			return fmt.Errorf("untar %s: %w", tarPath, err)
+		}
 	}
 
-	// export combined rootfs to tar file
-	tarPath := filepath.Join(tmpDir, alias+".tar")
-	if err := os.MkdirAll(tmpDir, 0755); err != nil {
-		return fmt.Errorf("mkdir unpack dir: %w", err)
-	}
-	f, err := os.Create(tarPath)
-	if err != nil {
-		return fmt.Errorf("could not create tar file %s: %w", tarPath, err)
-	}
-	defer f.Close()
-	if err := crane.Export(img, f); err != nil {
-		return fmt.Errorf("failed to export image %s to tar: %w", drvCfg.Image, err)
-	}
-
-	// extract the combined rootfs tar into rootfs dir
-	rootfs := filepath.Join(tmpDir, "rootfs")
-	if err := os.MkdirAll(rootfs, 0755); err != nil {
-		return fmt.Errorf("mkdir rootfs dir: %w", err)
-	}
-	if err := unpackTar(tarPath, rootfs); err != nil {
-		return fmt.Errorf("untar %s: %w", tarPath, err)
-	}
+	fmt.Printf("Starting CSI driver %s\r\n", alias)
 
 	// build chrooted command
 	// within chroot, binary lives at /<BinPath>

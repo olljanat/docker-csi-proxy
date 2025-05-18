@@ -14,6 +14,7 @@
       "binPath": "/smbplugin",
       "startCommand": [
         "--v=5",
+        "--drivername=smb",
         "--enable-get-volume-stats=false"
       ]
     },

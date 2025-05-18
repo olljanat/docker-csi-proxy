@@ -42,6 +42,8 @@ func (c *Client) DeleteVolume(ctx context.Context, id string) error {
 }
 
 func (c *Client) NodeStageVolume(ctx context.Context, volumeID, stagingTarget string, volumeContext, secrets map[string]string) error {
+	fmt.Printf("NodeStageVolume, volume ID: %v , volumeContext: %v\r\n", volumeID, volumeContext)
+
 	_, err := c.node.NodeStageVolume(ctx, &csi.NodeStageVolumeRequest{
 		VolumeId:          volumeID,
 		StagingTargetPath: stagingTarget,
