@@ -12,6 +12,7 @@
         "username": "olli",
         "password": "Qwerty7!"
       },
+      "binPath": "/smbplugin",
       "startCommand": [
         "--v=5",
         "--enable-get-volume-stats=false"
@@ -25,7 +26,10 @@
         "share": "/export"
       },
       "secrets": {},
-      "startCommand": []
+      "binPath": "/nfsplugin",
+      "startCommand": [
+        "--v=5"
+      ]
     }
   }
 }

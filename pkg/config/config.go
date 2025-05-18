@@ -14,8 +14,7 @@ type DriverConfig struct {
 	Options      map[string]string `json:"options"`
 	Secrets      map[string]string `json:"secrets"`
 	StartCommand []string          `json:"startCommand"`
-	// relative path to the plugin binary inside the unpacked image rootfs
-	BinPath string `json:"binPath"`
+	BinPath      string            `json:"binPath"`
 }
 
 type Config struct {
