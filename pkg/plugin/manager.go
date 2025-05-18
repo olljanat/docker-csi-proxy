@@ -48,7 +48,8 @@ func (m *Manager) ensurePluginRunning(alias string) error {
 	}
 	drvCfg := m.cfg.Drivers[alias]
 	tmpDir := filepath.Join("/plugins", alias)
-	socketPath := filepath.Join(m.cfg.CSIEndpointDir, alias+".sock")
+	socketPath := filepath.Join("/run", alias+".sock")
+	socketPath2 := filepath.Join(tmpDir, "rootfs", socketPath)
 
 	// pull image
 	img, err := crane.Pull(drvCfg.Image)
@@ -102,11 +103,11 @@ func (m *Manager) ensurePluginRunning(alias string) error {
 	// wait for socket
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if _, err := os.Stat(socketPath); err == nil {
+		if _, err := os.Stat(socketPath2); err == nil {
 			break
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for socket %s", socketPath)
+			return fmt.Errorf("timeout waiting for socket %s", socketPath2)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

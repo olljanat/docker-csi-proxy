@@ -1,5 +1,4 @@
 {
-  "csiEndpointDir": "/run/csi-proxy",
   "nodeIDEnvVar": "CSI_NODE_ID",
   "drivers": {
     "smb": {

@@ -18,10 +18,9 @@ type DriverConfig struct {
 }
 
 type Config struct {
-	CSIEndpointDir string                   `json:"csiEndpointDir"`
-	NodeIDEnvVar   string                   `json:"nodeIDEnvVar"`
-	NodeID         string                   // filled at runtime
-	Drivers        map[string]*DriverConfig `json:"drivers"`
+	NodeIDEnvVar string                   `json:"nodeIDEnvVar"`
+	NodeID       string                   // filled at runtime
+	Drivers      map[string]*DriverConfig `json:"drivers"`
 }
 
 func LoadConfig() *Config {
@@ -32,11 +31,6 @@ func LoadConfig() *Config {
 	var cfg Config
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		log.Fatalf("invalid config format: %v", err)
-	}
-
-	// ensure socket dir exists
-	if err := os.MkdirAll(cfg.CSIEndpointDir, 0755); err != nil {
-		log.Fatalf("could not create CSI endpoint dir: %v", err)
 	}
 
 	// determine NodeID
@@ -52,5 +46,5 @@ func LoadConfig() *Config {
 }
 
 func (c *Config) SocketFor(alias string) string {
-	return "unix://" + path.Join(c.CSIEndpointDir, alias+".sock")
+	return "unix://" + path.Join("/run", alias+".sock")
 }
