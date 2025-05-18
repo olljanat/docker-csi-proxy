@@ -1,0 +1,35 @@
+{
+    "description": "CSI proxy for Docker",
+    "documentation": "https://github.com/olljanat/docker-csi-proxy",
+    "entrypoint": [
+        "/docker-csi-proxy"
+    ],
+    "env": [
+        {
+            "description": "CSI endpoint",
+            "name": "CSI_ENDPOINT",
+            "settable": [
+                "value"
+            ],
+            "value": "unix:///run/csi-proxy/csi.sock"
+        }
+    ],
+    "interface": {
+        "socket": "csi-proxy.sock",
+        "types": [
+            "docker.volumedriver/1.0"
+        ]
+    },
+    "linux": {
+        "capabilities": [
+            "CAP_DAC_READ_SEARCH",
+            "CAP_SYS_ADMIN"
+        ]
+    },
+    "mounts": [
+    ],
+    "network": {
+        "type": "host"
+    },
+    "propagatedmount": "/data"
+}
