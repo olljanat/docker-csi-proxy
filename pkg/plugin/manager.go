@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/crane"
@@ -46,7 +47,7 @@ func (m *Manager) ensurePluginRunning(alias string) error {
 		return nil
 	}
 	drvCfg := m.cfg.Drivers[alias]
-	tmpDir := filepath.Join("/tmp/csi-proxy", alias)
+	tmpDir := filepath.Join("/plugins", alias)
 	socketPath := filepath.Join(m.cfg.CSIEndpointDir, alias+".sock")
 
 	// pull image
@@ -78,25 +79,24 @@ func (m *Manager) ensurePluginRunning(alias string) error {
 		return fmt.Errorf("untar %s: %w", tarPath, err)
 	}
 
-	// locate binary
-	binPath := filepath.Join(rootfs, drvCfg.BinPath)
-	if _, err := os.Stat(binPath); os.IsNotExist(err) {
-		return fmt.Errorf("binary not found at %s", binPath)
-	}
-
-	// build args
+	// build chrooted command
+	// within chroot, binary lives at /<BinPath>
+	chrootBin := filepath.Join("/", drvCfg.BinPath)
 	args := []string{
+		chrootBin,
 		"--nodeid", m.cfg.NodeID,
 		"--endpoint", "unix://" + socketPath,
 		"--drivername", drvCfg.DriverName,
 	}
 	args = append(args, drvCfg.StartCommand...)
 
-	cmd := exec.Command(binPath, args...)
+	cmd := exec.Command("chroot", append([]string{rootfs}, args...)...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{}
+
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start plugin %s: %w", alias, err)
+		return fmt.Errorf("start chrooted plugin %s: %w", alias, err)
 	}
 
 	// wait for socket
