@@ -1,3 +1,4 @@
+// pkg/plugin/manager.go
 package plugin
 
 import (
@@ -122,6 +123,12 @@ func (m *Manager) ensurePluginRunning(alias string) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start chrooted plugin %s: %w", alias, err)
 	}
+
+	// ensure we unmount proc when plugin exits
+	go func(procPath string) {
+		cmd.Wait()
+		syscall.Unmount(procPath, 0)
+	}(procTarget)
 
 	// wait for socket
 	deadline := time.Now().Add(5 * time.Second)

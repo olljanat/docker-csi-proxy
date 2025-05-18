@@ -5,6 +5,7 @@ At least all CSI plugins mentioned in [CSI plugins for Docker Swarm](https://git
 
 TODO:
 * Implement `NodeUnstageVolume`
+* Umount /proc from CSI driver chroots
 * Save volumes configuration to disk.
 * Automatically download CSI plugins.
 * Support multiple CSI plugins in parallel.
