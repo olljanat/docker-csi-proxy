@@ -80,7 +80,7 @@ func (m *Manager) ensurePluginRunning(alias string) error {
 		}
 	}
 
-	fmt.Printf("Starting CSI driver %s\r\n", alias)
+	fmt.Printf("Downloading CSI driver %s\r\n", alias)
 
 	// build chrooted command
 	// within chroot, binary lives at /<BinPath>

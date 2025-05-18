@@ -94,7 +94,7 @@ func (d *VolumeDriver) Create(r *volume.CreateRequest) error {
 	}
 	d.mu.Unlock()
 
-	parent := filepath.Join("/data", r.Name)
+	parent := filepath.Join(baseDir, r.Name)
 	if _, err := os.Stat(parent); os.IsNotExist(err) {
 		if err := os.MkdirAll(parent, os.ModePerm); err != nil {
 			log.Fatal(err)
