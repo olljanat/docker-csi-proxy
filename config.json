@@ -1,35 +1,31 @@
 {
-    "description": "CSI proxy for Docker",
-    "documentation": "https://github.com/olljanat/docker-csi-proxy",
-    "entrypoint": [
-        "/docker-csi-proxy"
-    ],
-    "env": [
-        {
-            "description": "CSI endpoint",
-            "name": "CSI_ENDPOINT",
-            "settable": [
-                "value"
-            ],
-            "value": "unix:///run/csi-proxy/csi.sock"
-        }
-    ],
-    "interface": {
-        "socket": "csi-proxy.sock",
-        "types": [
-            "docker.volumedriver/1.0"
-        ]
+  "csiEndpointDir": "/run/csi-proxy",
+  "nodeIDEnvVar": "CSI_NODE_ID",      // or omit to fallback to hostname
+  "drivers": {
+    "smb": {
+      "image": "registry.k8s.io/sig-storage/smbplugin:v1.18.0",
+      "driverName": "smb",
+      "options": {
+        "source": "//10.10.10.100/data"
+      },
+      "secrets": {
+        "username": "smbuser",
+        "password": "P@ssw0rd!"
+      },
+      "startCommand": [
+        "--v=5",
+        "--enable-get-volume-stats=false"
+      ]
     },
-    "linux": {
-        "capabilities": [
-            "CAP_DAC_READ_SEARCH",
-            "CAP_SYS_ADMIN"
-        ]
-    },
-    "mounts": [
-    ],
-    "network": {
-        "type": "host"
-    },
-    "propagatedmount": "/data"
+    "nfs": {
+      "image": "registry.k8s.io/sig-storage/nfsplugin:v2.0.0",
+      "driverName": "nfs",
+      "options": {
+        "server": "nfs.example.com",
+        "share": "/export"
+      },
+      "secrets": {},
+      "startCommand": []
+    }
+  }
 }

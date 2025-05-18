@@ -21,6 +21,7 @@ var (
 type VolumeDriver struct {
 	client  *csi.Client
 	cfg     *config.Config
+	mgr     *Manager
 	volumes map[string]*volumeInfo
 	mu      sync.RWMutex
 }
@@ -41,22 +42,64 @@ func NewVolumeDriver(c *csi.Client, cfg *config.Config) volume.Driver {
 	return &VolumeDriver{
 		client:  c,
 		cfg:     cfg,
+		mgr:     newManager(cfg),
 		volumes: make(map[string]*volumeInfo),
 	}
 }
 
 func (d *VolumeDriver) Create(r *volume.CreateRequest) error {
-	opts, secrets := parseOptions(r.Options)
-	volume := &volumeInfo{
-		Name:    r.Name,
-		Options: opts,
-		Secrets: secrets,
-		Mounted: false,
+	// 1) User must specify driver alias:
+	alias, ok := r.Options["driver"]
+	if !ok {
+		return fmt.Errorf("must specify --opt driver=<alias>")
 	}
+
+	// 2) Plugin bootstrap:
+	if err := d.mgr.EnsureRunning(alias); err != nil {
+		return err
+	}
+
+	// 3) Build final opts & secrets by merging:
+	drvCfg := d.cfg.Drivers[alias]
+
+	// start with system defaults...
+	finalOpts := make(map[string]string)
+	for k, v := range drvCfg.Options {
+		finalOpts[k] = v
+	}
+	finalSecrets := make(map[string]string)
+	for k, v := range drvCfg.Secrets {
+		finalSecrets[k] = v
+	}
+
+	// override with anything the user passed:
+	for k, v := range r.Options {
+		switch k {
+		case "driver":
+			// skip
+		default:
+			// if key matches one of drvCfg.Secrets, treat as secret
+			if _, exists := drvCfg.Secrets[k]; exists {
+				finalSecrets[k] = v
+			} else {
+				finalOpts[k] = v
+			}
+		}
+	}
+
+	// 4) Point CSI client at the right socket:
+	d.client.SetEndpoint(d.cfg.SocketFor(alias))
+
+	// 5) record volume & call CSI:
 	d.mu.Lock()
-	d.volumes[r.Name] = volume
+	d.volumes[r.Name] = &volumeInfo{
+		Name:    r.Name,
+		Options: finalOpts,
+		Secrets: finalSecrets,
+	}
 	d.mu.Unlock()
 
+	// Ensure that folders exist
 	parent := filepath.Join(baseDir, r.Name)
 	if _, err := os.Stat(parent); os.IsNotExist(err) {
 		if err := os.MkdirAll(parent, os.ModePerm); err != nil {
@@ -76,7 +119,7 @@ func (d *VolumeDriver) Create(r *volume.CreateRequest) error {
 		}
 	}
 
-	return d.client.CreateVolume(context.Background(), r.Name, opts)
+	return d.client.CreateVolume(context.Background(), r.Name, finalOpts)
 }
 
 func (d *VolumeDriver) Remove(r *volume.RemoveRequest) error {
