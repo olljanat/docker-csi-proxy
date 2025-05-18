@@ -80,7 +80,7 @@ func (m *Manager) ensurePluginRunning(alias string) error {
 		}
 	}
 
-	fmt.Printf("Downloading CSI driver %s\r\n", alias)
+	fmt.Printf("Activating CSI driver %s\r\n", alias)
 
 	// build chrooted command
 	// within chroot, binary lives at /<BinPath>
@@ -180,6 +180,20 @@ func unpackTar(tarPath, dest string) error {
 			if err := os.MkdirAll(target, os.FileMode(hdr.Mode)); err != nil {
 				return err
 			}
+		case tar.TypeSymlink:
+			// create symbolic link
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return err
+			}
+			if err := os.Symlink(hdr.Linkname, target); err != nil {
+				return err
+			}
+		case tar.TypeLink:
+			// create hard link
+			linkTarget := filepath.Join(dest, hdr.Linkname)
+			if err := os.Link(linkTarget, target); err != nil {
+				return err
+			}
 		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err
@@ -193,6 +207,8 @@ func unpackTar(tarPath, dest string) error {
 				return err
 			}
 			out.Close()
+		default:
+			// skip other types
 		}
 	}
 	return nil

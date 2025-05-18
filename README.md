@@ -6,6 +6,7 @@ At least all CSI plugins mentioned in [CSI plugins for Docker Swarm](https://git
 TODO:
 * Implement `NodeUnstageVolume`
 * Umount /proc from CSI driver chroots
+* Mount /sys and /dev to CSI chroots
 * Save volumes configuration to disk.
 * Automatically download CSI plugins.
 * Support multiple CSI plugins in parallel.
@@ -44,4 +45,10 @@ docker volume create \
   --opt secret-password="P@ssw0rd!" \
   my-smb-volume
 docker run -it --rm -v my-smb-volume:/data bash
+```
+
+# Troubleshooting
+```bash
+tail -f /plugins/smb/logs/smb.log
+sudo chroot /plugins/smb/rootfs /bin/sh
 ```
