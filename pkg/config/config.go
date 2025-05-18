@@ -46,5 +46,5 @@ func LoadConfig() *Config {
 }
 
 func (c *Config) SocketFor(alias string) string {
-	return "unix://" + path.Join("/run", alias+".sock")
+	return "unix://" + path.Join("plugins", alias, "rootfs/run", alias+".sock")
 }

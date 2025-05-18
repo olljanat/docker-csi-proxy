@@ -1,3 +1,4 @@
+// pkg/plugin/manager.go
 package plugin
 
 import (
@@ -32,7 +33,7 @@ func NewManager(cfg *config.Config) *Manager {
 // ActivateAll pulls, unpacks, and starts every driver defined in config
 func (m *Manager) ActivateAll() error {
 	for alias := range m.cfg.Drivers {
-		fmt.Printf("Activating CSI driver %s\r\n", alias)
+		fmt.Printf("Ensuring CSI driver %s\r\n", alias)
 		if err := m.ensurePluginRunning(alias); err != nil {
 			return fmt.Errorf("failed to start driver %s: %w", alias, err)
 		}
@@ -92,8 +93,20 @@ func (m *Manager) ensurePluginRunning(alias string) error {
 	args = append(args, drvCfg.StartCommand...)
 
 	cmd := exec.Command("chroot", append([]string{rootfs}, args...)...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	// redirect plugin output to log file
+	logDir := filepath.Join(tmpDir, "logs")
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return fmt.Errorf("could not create log dir: %w", err)
+	}
+	logFile := filepath.Join(logDir, alias+".log")
+	fLog, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("could not open log file %s: %w", logFile, err)
+	}
+	// write both stdout and stderr to the same file
+	cmd.Stdout = fLog
+	cmd.Stderr = fLog
 	cmd.SysProcAttr = &syscall.SysProcAttr{}
 
 	if err := cmd.Start(); err != nil {

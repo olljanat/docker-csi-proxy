@@ -55,6 +55,10 @@ func (d *VolumeDriver) Create(r *volume.CreateRequest) error {
 		return fmt.Errorf("--opt driver=<alias> is required")
 	}
 
+	if _, ok := d.cfg.Drivers[alias]; !ok {
+		return fmt.Errorf("CSI driver %s does not exist", alias)
+	}
+
 	// merge defaults & user opts
 	drvCfg := d.cfg.Drivers[alias]
 	finalOpts := make(map[string]string)
@@ -115,7 +119,7 @@ func (d *VolumeDriver) Create(r *volume.CreateRequest) error {
 func (d *VolumeDriver) Remove(r *volume.RemoveRequest) error {
 	v, ok := d.volumes[r.Name]
 	if !ok {
-		return fmt.Errorf("volume %s doesn not exist", r.Name)
+		return fmt.Errorf("volume %s does not exist", r.Name)
 	}
 	err := d.clients[v.Alias].DeleteVolume(context.Background(), r.Name)
 	if err != nil {
@@ -132,7 +136,7 @@ func (d *VolumeDriver) Get(r *volume.GetRequest) (*volume.GetResponse, error) {
 	defer d.mu.RUnlock()
 
 	if _, ok := d.volumes[r.Name]; !ok {
-		return nil, fmt.Errorf("volume %s doesn not exist", r.Name)
+		return nil, fmt.Errorf("volume %s does not exist", r.Name)
 	}
 	return &volume.GetResponse{
 		Volume: &volume.Volume{
@@ -186,7 +190,7 @@ func (d *VolumeDriver) Mount(r *volume.MountRequest) (*volume.MountResponse, err
 func (d *VolumeDriver) Unmount(r *volume.UnmountRequest) error {
 	v, ok := d.volumes[r.Name]
 	if !ok {
-		return fmt.Errorf("volume %s doesn not exist", r.Name)
+		return fmt.Errorf("volume %s does not exist", r.Name)
 	}
 	mountpoint := filepath.Join(baseDir, r.Name)
 	return d.clients[v.Alias].NodeUnpublishVolume(context.Background(), r.Name, mountpoint)
