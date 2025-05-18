@@ -1,4 +1,3 @@
-// pkg/plugin/manager.go
 package plugin
 
 import (
@@ -92,8 +91,18 @@ func (m *Manager) ensurePluginRunning(alias string) error {
 		"--drivername", drvCfg.DriverName,
 	}
 	args = append(args, drvCfg.StartCommand...)
-
 	cmd := exec.Command("chroot", append([]string{rootfs}, args...)...)
+
+	// ensure /proc is mounted inside chroot so mountpoints propagate
+	procTarget := filepath.Join(rootfs, "proc")
+	if err := os.MkdirAll(procTarget, 0555); err != nil {
+		return fmt.Errorf("could not create proc mount point: %w", err)
+	}
+	if err := syscall.Mount("proc", procTarget, "proc", 0, ""); err != nil {
+		if !os.IsExist(err) {
+			return fmt.Errorf("failed to mount proc in chroot: %w", err)
+		}
+	}
 
 	// redirect plugin output to log file
 	logDir := filepath.Join(tmpDir, "logs")
