@@ -1,16 +1,16 @@
 {
   "csiEndpointDir": "/run/csi-proxy",
-  "nodeIDEnvVar": "CSI_NODE_ID",      // or omit to fallback to hostname
+  "nodeIDEnvVar": "CSI_NODE_ID",
   "drivers": {
     "smb": {
       "image": "registry.k8s.io/sig-storage/smbplugin:v1.18.0",
       "driverName": "smb",
       "options": {
-        "source": "//10.10.10.100/data"
+        "source": "//192.168.8.50/temp2"
       },
       "secrets": {
-        "username": "smbuser",
-        "password": "P@ssw0rd!"
+        "username": "olli",
+        "password": "Qwerty7!"
       },
       "startCommand": [
         "--v=5",
@@ -18,7 +18,7 @@
       ]
     },
     "nfs": {
-      "image": "registry.k8s.io/sig-storage/nfsplugin:v2.0.0",
+      "image": "registry.k8s.io/sig-storage/nfsplugin:v4.11.0",
       "driverName": "nfs",
       "options": {
         "server": "nfs.example.com",

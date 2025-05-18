@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"sync"
 	"time"
@@ -32,6 +31,7 @@ func NewManager(cfg *config.Config) *Manager {
 // ActivateAll pulls, unpacks, and starts every driver defined in config
 func (m *Manager) ActivateAll() error {
 	for alias := range m.cfg.Drivers {
+		fmt.Printf("Activating CSI driver %s\r\n", alias)
 		if err := m.ensurePluginRunning(alias); err != nil {
 			return fmt.Errorf("failed to start driver %s: %w", alias, err)
 		}
@@ -46,23 +46,30 @@ func (m *Manager) ensurePluginRunning(alias string) error {
 		return nil
 	}
 	drvCfg := m.cfg.Drivers[alias]
-	tmpDir := path.Join(m.cfg.CSIEndpointDir, "images", alias)
-	socketPath := path.Join(m.cfg.CSIEndpointDir, alias+".sock")
+	tmpDir := filepath.Join("/tmp/csi-proxy", alias)
+	socketPath := filepath.Join(m.cfg.CSIEndpointDir, alias+".sock")
 
-	// pull image to tar file
-	tarPath := path.Join(tmpDir, alias+".tar")
-	if err := os.MkdirAll(tmpDir, 0755); err != nil {
-		return fmt.Errorf("mkdir unpack dir: %w", err)
-	}
-	image, err := crane.Pull(drvCfg.Image)
+	// pull image
+	img, err := crane.Pull(drvCfg.Image)
 	if err != nil {
 		return fmt.Errorf("pull image %s: %w", drvCfg.Image, err)
 	}
-	if err := crane.Save(image, alias, tarPath); err != nil {
-		return fmt.Errorf("failed to save image %s to tar: %w", drvCfg.Image, err)
+
+	// export combined rootfs to tar file
+	tarPath := filepath.Join(tmpDir, alias+".tar")
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		return fmt.Errorf("mkdir unpack dir: %w", err)
+	}
+	f, err := os.Create(tarPath)
+	if err != nil {
+		return fmt.Errorf("could not create tar file %s: %w", tarPath, err)
+	}
+	defer f.Close()
+	if err := crane.Export(img, f); err != nil {
+		return fmt.Errorf("failed to export image %s to tar: %w", drvCfg.Image, err)
 	}
 
-	// extract tar into tmpDir/rootfs
+	// extract the combined rootfs tar into rootfs dir
 	rootfs := filepath.Join(tmpDir, "rootfs")
 	if err := os.MkdirAll(rootfs, 0755); err != nil {
 		return fmt.Errorf("mkdir rootfs dir: %w", err)
@@ -72,7 +79,7 @@ func (m *Manager) ensurePluginRunning(alias string) error {
 	}
 
 	// locate binary
-	binPath := path.Join(rootfs, drvCfg.BinPath)
+	binPath := filepath.Join(rootfs, drvCfg.BinPath)
 	if _, err := os.Stat(binPath); os.IsNotExist(err) {
 		return fmt.Errorf("binary not found at %s", binPath)
 	}
@@ -139,8 +146,7 @@ func unpackTar(tarPath, dest string) error {
 		target := filepath.Join(dest, hdr.Name)
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			ns := os.FileMode(hdr.Mode)
-			if err := os.MkdirAll(target, ns); err != nil {
+			if err := os.MkdirAll(target, os.FileMode(hdr.Mode)); err != nil {
 				return err
 			}
 		case tar.TypeReg:
