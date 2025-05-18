@@ -14,12 +14,14 @@ type DriverConfig struct {
 	Options      map[string]string `json:"options"`
 	Secrets      map[string]string `json:"secrets"`
 	StartCommand []string          `json:"startCommand"`
+	// relative path to the plugin binary inside the unpacked image rootfs
+	BinPath string `json:"binPath"`
 }
 
 type Config struct {
 	CSIEndpointDir string                   `json:"csiEndpointDir"`
 	NodeIDEnvVar   string                   `json:"nodeIDEnvVar"`
-	NodeID         string                   // filled in at runtime
+	NodeID         string                   // filled at runtime
 	Drivers        map[string]*DriverConfig `json:"drivers"`
 }
 
@@ -33,7 +35,7 @@ func LoadConfig() *Config {
 		log.Fatalf("invalid config format: %v", err)
 	}
 
-	// ensure CSIEndpointDir exists
+	// ensure socket dir exists
 	if err := os.MkdirAll(cfg.CSIEndpointDir, 0755); err != nil {
 		log.Fatalf("could not create CSI endpoint dir: %v", err)
 	}
