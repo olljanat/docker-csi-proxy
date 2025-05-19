@@ -2,35 +2,42 @@
 package plugin
 
 import (
-	"archive/tar"
-	"compress/gzip"
+	"context"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
-	"github.com/google/go-containerregistry/pkg/crane"
+	"github.com/containerd/containerd"
+	"github.com/containerd/containerd/cio"
+	"github.com/containerd/containerd/namespaces"
+	"github.com/containerd/containerd/oci"
 	"github.com/olljanat/docker-csi-proxy/pkg/config"
 )
 
 type Manager struct {
 	cfg    *config.Config
-	active map[string]bool
+	client *containerd.Client
+	active map[string]containerd.Container
 	mu     sync.Mutex
 }
 
-func NewManager(cfg *config.Config) *Manager {
+func NewManager(cfg *config.Config) (*Manager, error) {
+	cli, err := containerd.New("/run/containerd/containerd.sock",
+		containerd.WithDefaultNamespace("csi-proxy"),
+	)
+	if err != nil {
+		return nil, err
+	}
 	return &Manager{
 		cfg:    cfg,
-		active: make(map[string]bool, len(cfg.Drivers)),
-	}
+		client: cli,
+		active: make(map[string]containerd.Container),
+	}, nil
 }
 
-// ActivateAll pulls, unpacks, and starts every driver defined in config
+// ActivateAll pulls and starts every driver defined in config
 func (m *Manager) ActivateAll() error {
 	for alias := range m.cfg.Drivers {
 		if err := m.ensurePluginRunning(alias); err != nil {
@@ -43,173 +50,69 @@ func (m *Manager) ActivateAll() error {
 func (m *Manager) ensurePluginRunning(alias string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.active[alias] {
+	if _, ok := m.active[alias]; ok {
 		return nil
 	}
-	drvCfg := m.cfg.Drivers[alias]
-	tmpDir := filepath.Join("/plugins", alias)
-	rootfs := filepath.Join(tmpDir, "rootfs")
-	socketPath := filepath.Join("/run", alias+".sock")
-	socketPath2 := filepath.Join(tmpDir, "rootfs", socketPath)
 
-	// Download once, only active after that
-	if _, err := os.Stat(rootfs); err != nil {
-		fmt.Printf("Downloading CSI driver %s\r\n", alias)
+	drv := m.cfg.Drivers[alias]
+	ctx := namespaces.WithNamespace(context.Background(), "csi-proxy")
 
-		img, err := crane.Pull(drvCfg.Image)
-		if err != nil {
-			return fmt.Errorf("pull image %s: %w", drvCfg.Image, err)
-		}
-		tarPath := filepath.Join(tmpDir, alias+".tar")
-		if err := os.MkdirAll(tmpDir, 0755); err != nil {
-			return fmt.Errorf("mkdir unpack dir: %w", err)
-		}
-		f, err := os.Create(tarPath)
-		if err != nil {
-			return fmt.Errorf("could not create tar file %s: %w", tarPath, err)
-		}
-		defer f.Close()
-		if err := crane.Export(img, f); err != nil {
-			return fmt.Errorf("failed to export image %s to tar: %w", drvCfg.Image, err)
-		}
-		if err := os.MkdirAll(rootfs, 0755); err != nil {
-			return fmt.Errorf("mkdir rootfs dir: %w", err)
-		}
-		if err := unpackTar(tarPath, rootfs); err != nil {
-			return fmt.Errorf("untar %s: %w", tarPath, err)
-		}
-	}
-
-	fmt.Printf("Activating CSI driver %s\r\n", alias)
-
-	// build chrooted command
-	// within chroot, binary lives at /<BinPath>
-	chrootBin := filepath.Join("/", drvCfg.BinPath)
-	args := []string{
-		chrootBin,
-		"--nodeid", m.cfg.NodeID,
-		"--endpoint", "unix://" + socketPath,
-		"--drivername", drvCfg.DriverName,
-	}
-	args = append(args, drvCfg.StartCommand...)
-	cmd := exec.Command("chroot", append([]string{rootfs}, args...)...)
-
-	// ensure /proc is mounted inside chroot so mountpoints propagate
-	procTarget := filepath.Join(rootfs, "proc")
-	if err := os.MkdirAll(procTarget, 0555); err != nil {
-		return fmt.Errorf("could not create proc mount point: %w", err)
-	}
-	if err := syscall.Mount("proc", procTarget, "proc", 0, ""); err != nil {
-		if !os.IsExist(err) {
-			return fmt.Errorf("failed to mount proc in chroot: %w", err)
-		}
-	}
-
-	// redirect plugin output to log file
-	logDir := filepath.Join(tmpDir, "logs")
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		return fmt.Errorf("could not create log dir: %w", err)
-	}
-	logFile := filepath.Join(logDir, alias+".log")
-	fLog, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	// 1) Pull and unpack image
+	image, err := m.client.Pull(ctx, drv.Image, containerd.WithPullUnpack)
 	if err != nil {
-		return fmt.Errorf("could not open log file %s: %w", logFile, err)
-	}
-	// write both stdout and stderr to the same file
-	cmd.Stdout = fLog
-	cmd.Stderr = fLog
-	cmd.SysProcAttr = &syscall.SysProcAttr{}
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start chrooted plugin %s: %w", alias, err)
+		return fmt.Errorf("pull %s: %w", drv.Image, err)
 	}
 
-	// ensure we unmount proc when plugin exits
-	go func(procPath string) {
-		cmd.Wait()
-		syscall.Unmount(procPath, 0)
-	}(procTarget)
+	// 2) Create containerd container
+	// socketHost := filepath.Join(m.cfg.CSIEndpointDir, alias+".sock")
+	socketHost := filepath.Join("/run", alias+".sock")
+	containerName := "csi-plugin-" + alias
+	ctr, err := m.client.NewContainer(
+		ctx,
+		containerName,
+		containerd.WithNewSnapshot(containerName+"-snap", image),
+		containerd.WithNewSpec(
+			oci.WithImageConfig(image),
+			oci.WithHostNamespace(),
+			oci.WithMounts([]oci.Mount{{
+				Type:        "bind",
+				Source:      m.cfg.CSIEndpointDir,
+				Destination: m.cfg.CSIEndpointDir,
+				Options:     []string{"rbind", "rw"},
+			}}),
+			oci.WithProcessArgs(
+				drv.BinPath,
+				"--nodeid", m.cfg.NodeID,
+				"--endpoint", "unix://"+socketHost,
+				"--drivername", drv.DriverName,
+			),
+		),
+	)
+	if err != nil {
+		return fmt.Errorf("container create %s: %w", alias, err)
+	}
 
-	// wait for socket
+	// 3) Start the container as a task with logging
+	task, err := ctr.NewTask(ctx, cio.LogFile(filepath.Join(m.cfg.CSIEndpointDir, "logs", alias+".log")))
+	if err != nil {
+		return fmt.Errorf("task create %s: %w", alias, err)
+	}
+	if err := task.Start(ctx); err != nil {
+		return fmt.Errorf("task start %s: %w", alias, err)
+	}
+
+	// 4) Wait for socket
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if _, err := os.Stat(socketPath2); err == nil {
+		if _, err := os.Stat(socketHost); err == nil {
 			break
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for socket %s", socketPath2)
+			return fmt.Errorf("timeout waiting for %s", socketHost)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	m.active[alias] = true
-	return nil
-}
-
-// unpackTar extracts a tar (optionally gzipped) to dest
-func unpackTar(tarPath, dest string) error {
-	f, err := os.Open(tarPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	var tr *tar.Reader
-	if filepath.Ext(tarPath) == ".gz" {
-		gr, err := gzip.NewReader(f)
-		if err != nil {
-			return err
-		}
-		defer gr.Close()
-		tr = tar.NewReader(gr)
-	} else {
-		tr = tar.NewReader(f)
-	}
-
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			return err
-		}
-
-		target := filepath.Join(dest, hdr.Name)
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, os.FileMode(hdr.Mode)); err != nil {
-				return err
-			}
-		case tar.TypeSymlink:
-			// create symbolic link
-			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-				return err
-			}
-			if err := os.Symlink(hdr.Linkname, target); err != nil {
-				return err
-			}
-		case tar.TypeLink:
-			// create hard link
-			linkTarget := filepath.Join(dest, hdr.Linkname)
-			if err := os.Link(linkTarget, target); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-				return err
-			}
-			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY, os.FileMode(hdr.Mode))
-			if err != nil {
-				return err
-			}
-			if _, err := io.Copy(out, tr); err != nil {
-				out.Close()
-				return err
-			}
-			out.Close()
-		default:
-			// skip other types
-		}
-	}
+	m.active[alias] = ctr
 	return nil
 }
