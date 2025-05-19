@@ -18,9 +18,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "cannot start plugin manager: %v\n", err)
 		os.Exit(1)
 	}
-	// removed ActivateAll from main
 
-	// register clients per driver
 	clients := make(map[string]*csi.Client)
 	for alias := range cfg.Drivers {
 		endpoint := cfg.SocketFor(alias)
