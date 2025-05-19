@@ -65,8 +65,9 @@ func (m *Manager) ensurePluginRunning(alias string) error {
 	}
 
 	// 2) Create containerd container
-	// socketHost := filepath.Join(m.cfg.CSIEndpointDir, alias+".sock")
-	socketHost := filepath.Join("/run", alias+".sock")
+	tmpDir := filepath.Join("/plugins", alias)
+	socketPath := filepath.Join("/data", alias+".sock")
+	socketPathHost := filepath.Join(tmpDir, alias+".sock")
 	containerName := "csi-plugin-" + alias
 	ctr, err := m.client.NewContainer(
 		ctx,
@@ -75,29 +76,27 @@ func (m *Manager) ensurePluginRunning(alias string) error {
 		containerd.WithNewSpec(
 			oci.WithImageConfig(image),
 			oci.WithHostNamespace(specs.NetworkNamespace),
-
+			oci.WithMounts([]specs.Mount{
+				{
+					Type:        "bind",
+					Source:      tmpDir,
+					Destination: "/data",
+					Options:     []string{"rbind", "rw"},
+				},
+			}),
 			oci.WithProcessArgs(
 				drv.BinPath,
 				"--nodeid", m.cfg.NodeID,
-				"--endpoint", "unix://"+socketHost,
+				"--endpoint", "unix://"+socketPath,
 				"--drivername", drv.DriverName,
 			),
 		),
 	)
-	/*
-		oci.WithMounts([]oci.Mount{{
-			Type:        "bind",
-			Source:      m.cfg.CSIEndpointDir,
-			Destination: m.cfg.CSIEndpointDir,
-			Options:     []string{"rbind", "rw"},
-		}}),
-	*/
 	if err != nil {
 		return fmt.Errorf("container create %s: %w", alias, err)
 	}
 
 	// 3) Start the container as a task with logging
-	tmpDir := filepath.Join("/plugins", alias)
 	task, err := ctr.NewTask(ctx, cio.LogFile(filepath.Join(tmpDir, alias+".log")))
 	if err != nil {
 		return fmt.Errorf("task create %s: %w", alias, err)
@@ -109,11 +108,11 @@ func (m *Manager) ensurePluginRunning(alias string) error {
 	// 4) Wait for socket
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if _, err := os.Stat(socketHost); err == nil {
+		if _, err := os.Stat(socketPathHost); err == nil {
 			break
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for %s", socketHost)
+			return fmt.Errorf("timeout waiting for %s", socketPathHost)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

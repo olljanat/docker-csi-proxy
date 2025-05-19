@@ -12,37 +12,16 @@ TODO:
 * Support multiple CSI plugins in parallel.
 * Add Windows support
 * Support non-containerized workloads (CSI storage for all)
+* Propagate /data to CSI plugins
+* Cleanup in shutdown
 
 # Usage
-## Extract and run SMB CSI
-```bash
-docker create --name smbplugin registry.k8s.io/sig-storage/smbplugin:v1.18.0
-mkdir -p smb
-docker export smbplugin | tar -x -C smb
-docker rm -vf smbplugin
-
-mkdir /run/csi-proxy
-NODE_ID=$(cat /etc/hostname)
-./smbplugin -v=5 --drivername=smb \
-  --nodeid=${NODE_ID} \
-  --enable-get-volume-stats=false \
-  --endpoint="unix:///run/csi-proxy/smb.sock"
-```
-
-## Run proxy
-```bash
-go build
-export CSI_ENDPOINT=unix:///run/csi-proxy/smb.sock
-./docker-csi-proxy
-```
 
 ## Create and mount volume
 ```bash
 docker volume create \
   --driver csi-proxy \
-  --opt source="//10.10.10.100/data" \
-  --opt secret-username="smbuser" \
-  --opt secret-password="P@ssw0rd!" \
+  --opt driver=smb \
   my-smb-volume
 docker run -it --rm -v my-smb-volume:/data bash
 ```
@@ -52,3 +31,19 @@ docker run -it --rm -v my-smb-volume:/data bash
 tail -f /plugins/smb/logs/smb.log
 sudo chroot /plugins/smb/rootfs /bin/sh
 ```
+
+sudo ./nerdctl --namespace=csi-proxy stop $(sudo ./nerdctl --namespace=csi-proxy ps -a -q)
+sudo ./nerdctl --namespace=csi-proxy rm $(sudo ./nerdctl --namespace=csi-proxy ps -a -q)
+INFO[0000] unable to retrieve networking information for that container  container=csi-plugin-smb error="cannot determine networking options from nil spec.Annotations"
+WARN[0000] failed to remove hosts file for container "csi-plugin-smb"  error="hosts-store error\nnot found\nstat /var/lib/nerdctl/1935db59/etchosts/csi-proxy/csi-plugin-smb: no such file or directory"
+csi-plugin-s
+INFO[0000] unable to retrieve networking information for that container  container=csi-plugin-nfs error="cannot determine networking options from nil spec.Annotations"
+WARN[0000] failed to remove hosts file for container "csi-plugin-nfs"  error="hosts-store error\nnot found\nstat /var/lib/nerdctl/1935db59/etchosts/csi-proxy/csi-plugin-nfs: no such file or directory"
+csi-plugin-n
+
+olli@ubuntu:/tmp$ docker run -it --rm -v my-smb-volume:/data bash
+docker: Error response from daemon: error while mounting volume '': VolumeDriver.Mount: rpc error: code = Internal desc = volume(my-smb-volume) mount "//192.168.8.50/temp2" on "/data/my-smb-volume/staging" failed with mount failed: exit status 2
+Mounting command: mount
+Mounting arguments: -t cifs -o <masked> //192.168.8.50/temp2 /data/my-smb-volume/staging
+Output: Unable to apply new capability set.
+
