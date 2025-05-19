@@ -14,6 +14,7 @@ import (
 	"github.com/containerd/containerd/namespaces"
 	"github.com/containerd/containerd/oci"
 	"github.com/olljanat/docker-csi-proxy/pkg/config"
+	"github.com/opencontainers/runtime-spec/specs-go"
 )
 
 type Manager struct {
@@ -73,13 +74,8 @@ func (m *Manager) ensurePluginRunning(alias string) error {
 		containerd.WithNewSnapshot(containerName+"-snap", image),
 		containerd.WithNewSpec(
 			oci.WithImageConfig(image),
-			oci.WithHostNamespace(),
-			oci.WithMounts([]oci.Mount{{
-				Type:        "bind",
-				Source:      m.cfg.CSIEndpointDir,
-				Destination: m.cfg.CSIEndpointDir,
-				Options:     []string{"rbind", "rw"},
-			}}),
+			oci.WithHostNamespace(specs.NetworkNamespace),
+
 			oci.WithProcessArgs(
 				drv.BinPath,
 				"--nodeid", m.cfg.NodeID,
@@ -88,12 +84,21 @@ func (m *Manager) ensurePluginRunning(alias string) error {
 			),
 		),
 	)
+	/*
+		oci.WithMounts([]oci.Mount{{
+			Type:        "bind",
+			Source:      m.cfg.CSIEndpointDir,
+			Destination: m.cfg.CSIEndpointDir,
+			Options:     []string{"rbind", "rw"},
+		}}),
+	*/
 	if err != nil {
 		return fmt.Errorf("container create %s: %w", alias, err)
 	}
 
 	// 3) Start the container as a task with logging
-	task, err := ctr.NewTask(ctx, cio.LogFile(filepath.Join(m.cfg.CSIEndpointDir, "logs", alias+".log")))
+	tmpDir := filepath.Join("/plugins", alias)
+	task, err := ctr.NewTask(ctx, cio.LogFile(filepath.Join(tmpDir, alias+".log")))
 	if err != nil {
 		return fmt.Errorf("task create %s: %w", alias, err)
 	}

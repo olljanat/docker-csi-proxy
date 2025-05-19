@@ -13,7 +13,11 @@ import (
 func main() {
 	cfg := config.LoadConfig()
 
-	mgr := plugin.NewManager(cfg)
+	mgr, err := plugin.NewManager(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cannot start plugin manager: %v\n", err)
+		os.Exit(1)
+	}
 	// removed ActivateAll from main
 
 	// register clients per driver
